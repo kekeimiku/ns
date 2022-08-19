@@ -5,6 +5,8 @@ use core::{
     ffi::{c_char, c_double, c_float, c_void},
 };
 
+use crate::kernel::error::{Error, Result};
+
 global_asm!(include_str!("svc.s"));
 
 /// Pseudo handle for the current process.
@@ -16,7 +18,7 @@ pub const CUR_THREAD_HANDLE: u32 = 0xFFFF8000;
 /// Maximum number of objects that can be waited on by \ref svcWaitSynchronization (Horizon kernel limitation).
 pub const MAX_WAIT_OBJECTS: i32 = 0x40;
 
-type HANDLE = u32; //< Kernel object handle.
+pub type HANDLE = u32; //< Kernel object handle.
 
 #[repr(C)]
 struct MemoryInfo {
@@ -58,17 +60,17 @@ enum ThreadActivity {
 /// Armv8 CPU register.
 #[repr(C)]
 pub union CpuRegister {
-    x: u64, //< 64-bit AArch64 register view.
-    w: u32, //< 32-bit AArch64 register view.
-    r: u32, //< AArch32 register view.
+    pub x: u64, //< 64-bit AArch64 register view.
+    pub w: u32, //< 32-bit AArch64 register view.
+    pub r: u32, //< AArch32 register view.
 }
 
 /// Armv8 NEON register.
 #[repr(C)]
 pub union FpuRegister {
-    v: u128,     //< 128-bit vector view.
-    d: c_double, //< 64-bit double-precision view.
-    s: c_float,  //< 32-bit single-precision view.
+    pub v: u128,     //< 128-bit vector view.
+    pub d: c_double, //< 64-bit double-precision view.
+    pub s: c_float,  //< 32-bit single-precision view.
 }
 
 #[repr(C)]
@@ -173,7 +175,12 @@ extern "C" {
     fn svcCreateTransferMemory(out: *mut HANDLE, addr: *mut c_void, size: usize, perm: u32) -> u32;
     fn svcCloseHandle(handle: HANDLE) -> u32;
     fn svcResetSignal(handle: HANDLE) -> u32;
-    fn svcWaitSynchronization(index: *mut i32, handles: *const HANDLE, handle_count: i32, timeout: u64);
+    fn svcWaitSynchronization(
+        index: *mut i32,
+        handles: *const HANDLE,
+        handle_count: i32,
+        timeout: u64,
+    ) -> u32;
     fn svcCancelSynchronization(thread: HANDLE) -> u32;
     fn svcArbitrateLock(wait_tag: u32, tag_location: *mut u32, self_tag: u32) -> u32;
     fn svcArbitrateUnlock(tag_location: *mut u32) -> u32;
@@ -362,4 +369,46 @@ extern "C" {
     fn svcCreateResourceLimit(out: *mut HANDLE) -> u32;
     fn svcSetResourceLimitLimitValue(reslimit: HANDLE, which: LimitableResource, value: u64) -> u32;
     fn svcCallSecureMonitor(regs: *mut SecmonArgs);
+}
+
+pub fn reset_signal(handle: HANDLE) -> Result<()> {
+    let code = unsafe { svcResetSignal(handle) };
+    if code.eq(&0) {
+        return Ok(());
+    }
+    Err(Error::ResetSignal(code))
+}
+
+pub fn close_handle(handle: HANDLE) -> Result<()> {
+    let code = unsafe { svcCloseHandle(handle) };
+    if code.eq(&0) {
+        return Ok(());
+    }
+    Err(Error::CloseHandle(code))
+}
+
+pub fn create_event() -> Result<(HANDLE, HANDLE)> {
+    let (mut server, mut client): (HANDLE, HANDLE) = (0, 0);
+    let code = unsafe { svcCreateEvent(&mut server, &mut client) };
+    if code.eq(&0) {
+        return Ok((server, client));
+    }
+    Err(Error::CreateEvent(code))
+}
+
+pub fn signal_event(handle: HANDLE) -> Result<()> {
+    let code = unsafe { svcSignalEvent(handle) };
+    if code.eq(&0) {
+        return Ok(());
+    }
+    return Err(Error::SignalEvent(code));
+}
+
+pub fn wait_synchronization(handles: &[HANDLE], handle_count: i32, timeout: u64) -> Result<i32> {
+    let mut index = 0;
+    let code = unsafe { svcWaitSynchronization(&mut index, handles.as_ptr(), handle_count, timeout) };
+    if code.eq(&0) {
+        return Ok(index);
+    }
+    Err(Error::WaitSynchronization(code))
 }
