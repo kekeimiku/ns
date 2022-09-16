@@ -1,0 +1,14 @@
+[package]
+name = "nx-rs"
+version = "0.0.1"
+authors = ["kekelanact@gmail.com"]
+
+[lib]
+crate-type = ["staticlib"]
+
+[profile.release]
+panic = "abort"
+lto = true
+
+[build-dependencies]
+bindgen = "0.60.1"
